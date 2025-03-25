@@ -52,7 +52,9 @@ def function_declarations():
                 if line.startswith("<>"):
                     current_sequence = [line]
                 # End of a sequence
-                elif line == "end" and current_sequence is not None:
+                elif (
+                    (line == "end") or (line == "<end>")
+                ) and current_sequence is not None:
                     raw_data.append("\n".join(current_sequence[1:]))
                     current_sequence = None
                 # Part of a sequence
@@ -216,11 +218,11 @@ def _(labels, sequences, unique_chars, unique_labels):
         numeric_labels.append(numeric_label)
 
     # Display examples of the numeric conversion
-    for i in range(3):
-        print(f"Original sequence: {sequences[i][:20]}...")
-        print(f"Numeric sequence: {numeric_sequences[i][:20]}...")
-        print(f"Original label: {labels[i][:20]}...")
-        print(f"Numeric label: {numeric_labels[i][:20]}...")
+    for _i in range(3):
+        print(f"Original sequence: {sequences[_i][:20]}...")
+        print(f"Numeric sequence: {numeric_sequences[_i][:20]}...")
+        print(f"Original label: {labels[_i][:20]}...")
+        print(f"Numeric label: {numeric_labels[_i][:20]}...")
         print()
 
     # Create reverse mapping for reference
@@ -240,7 +242,6 @@ def _(labels, sequences, unique_chars, unique_labels):
     print(label_to_idx)
     return (
         char_to_idx,
-        i,
         idx_to_char,
         idx_to_label,
         json,
@@ -297,6 +298,92 @@ def _(labels, numeric_labels, numeric_sequences, pl, sequences):
 
     df
     return X, X_dict, data_dict, df, np, seq_len, y, y_dict
+
+
+@app.cell
+def _(char_to_idx, label_to_idx, np, pl, read_sequences):
+    # =============================================================================
+    # Read Test Sequences
+    # =============================================================================
+
+    test_data_path = "data/Protein_Secondary_Structure/protein-secondary-structure.test"
+
+    test_sequences, test_labels = read_sequences(test_data_path)
+    print(f"Test dataset: {len(test_sequences)} sequences")
+
+
+    # =============================================================================
+    # Process Test Data
+    # =============================================================================
+
+    # Convert test sequences and labels to numeric representations
+    test_numeric_sequences = []
+    test_numeric_labels = []
+
+    for _seq, _label in zip(test_sequences, test_labels):
+        _numeric_seq = [char_to_idx[char] for char in _seq]
+        _numeric_label = [label_to_idx[char] for char in _label]
+
+        test_numeric_sequences.append(_numeric_seq)
+        test_numeric_labels.append(_numeric_label)
+
+    # Convert to numpy arrays with padding
+    X_test = np.ones((len(test_numeric_sequences), 512), dtype=np.int32) * -1
+    y_test = np.ones((len(test_numeric_labels), 512), dtype=np.int32) * -1
+
+    for _i, (_seq, _label) in enumerate(zip(test_numeric_sequences, test_numeric_labels)):
+        _seq_len = len(_seq)
+        X_test[_i, :_seq_len] = _seq
+        y_test[_i, :_seq_len] = _label
+
+    print(f"X_test shape: {X_test.shape}")
+    print(f"y_test shape: {y_test.shape}")
+
+    # Create test DataFrame
+    test_data_dict = {
+        "sequence": test_sequences,
+        "label": test_labels,
+        "length": [len(seq) for seq in test_sequences],
+    }
+
+    print(f"X_test shape: {X_test.shape}")
+    print(f"y_test shape: {y_test.shape}")
+
+    X_test_dict = {f"x{i}": X_test[:, i] for i in range(X_test.shape[1])}
+    y_test_dict = {f"y{i}": y_test[:, i] for i in range(y_test.shape[1])}
+
+    test_data_dict.update(X_test_dict)
+    test_data_dict.update(y_test_dict)
+
+    # Create the test DataFrame
+    test_df = pl.DataFrame(test_data_dict)
+
+    # Display the test DataFrame
+    print("Test DataFrame shape:", test_df.shape)
+    print("\nTest DataFrame schema:")
+    print(test_df.schema)
+
+
+    # Save the test DataFrame to a csv file
+    test_df.write_csv(
+        "data/Protein_Secondary_Structure/protein-secondary-structure.test.csv"
+    )
+
+
+    test_df
+    return (
+        X_test,
+        X_test_dict,
+        test_data_dict,
+        test_data_path,
+        test_df,
+        test_labels,
+        test_numeric_labels,
+        test_numeric_sequences,
+        test_sequences,
+        y_test,
+        y_test_dict,
+    )
 
 
 if __name__ == "__main__":
