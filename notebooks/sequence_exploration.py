@@ -117,7 +117,7 @@ def sequence_processing(pad_sequences, read_sequences):
     # Read Sequences
     # =============================================================================
 
-    data_path = "/home/beepboop/Desktop/Subjects/bioinfo_project_frfr/data/Protein_Secondary_Structure/protein-secondary-structure.train"
+    data_path = "data/Protein_Secondary_Structure/protein-secondary-structure.train"
 
     sequences, labels = read_sequences(data_path)
 
@@ -339,6 +339,143 @@ def _(average_diff, maximal_diff, mo, std_diff):
 def _(mo):
     mo.md(
         r"""Overall, the distribution of characters in the padded sequences is similar to that of the original sequences. This indicates that the padding process does not significantly alter the distribution of characters in the sequences, except for certain outliers. We progress using the padded sequences for- training the machine learning model."""
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""## Investigating the effect of data augmentation on the distribution of labels in the sequences"""
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""### Distribution of Labels in the raw sequences""")
+    return
+
+
+@app.cell
+def _(alt, labels, mo, pl, unique_labels):
+    label_freq = {label: 0 for label in unique_labels}
+
+    for l_label in labels:
+        for label_char in l_label:
+            label_freq[label_char] += 1
+
+    label_freq = {
+        k: v
+        for k, v in sorted(label_freq.items(), key=lambda item: item[1], reverse=True)
+    }
+
+    label_freq = pl.DataFrame(
+        {
+            "Label": list(label_freq.keys()),
+            "Frequency": list(label_freq.values()),
+        }
+    )
+
+    # Get the sum of the frequencies
+    total_label_freq = label_freq["Frequency"].sum()
+
+    label_freq = label_freq.with_columns(
+        Percent=pl.col("Frequency") / total_label_freq * 100
+    )
+
+    label_freq.select("Label", "Percent")
+
+    mo.ui.altair_chart(
+        alt.Chart(label_freq.to_pandas())
+        .mark_bar()
+        .encode(x="Label", y="Percent", color="Label")
+    )
+    return l_label, label_char, label_freq, total_label_freq
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""### Distribution of Labels in the padded sequences""")
+    return
+
+
+@app.cell
+def _(alt, mo, padded_labels, pl, unique_labels):
+    p_label_freq = {label: 0 for label in unique_labels}
+
+    for pl_label in padded_labels:
+        for p_l in pl_label:
+            p_label_freq[p_l] += 1
+
+    p_label_freq = {
+        k: v
+        for k, v in sorted(p_label_freq.items(), key=lambda item: item[1], reverse=True)
+    }
+
+    p_label_freq = pl.DataFrame(
+        {
+            "Label": list(p_label_freq.keys()),
+            "Frequency": list(p_label_freq.values()),
+        }
+    )
+
+    # Get the sum of the frequencies
+    p_total_label_freq = p_label_freq["Frequency"].sum()
+
+    # Divide the frequency of each character by the total frequency to get the percentage
+    p_label_freq = p_label_freq.with_columns(
+        Percent=pl.col("Frequency") / p_total_label_freq * 100
+    )
+
+    p_label_freq.select("Label", "Percent")
+
+    mo.ui.altair_chart(
+        alt.Chart(p_label_freq.to_pandas())
+        .mark_bar()
+        .encode(x="Label", y="Percent", color="Label")
+    )
+    return p_l, p_label_freq, p_total_label_freq, pl_label
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""### Difference between the original and padded sequences in the distribution of labels"""
+    )
+    return
+
+
+@app.cell
+def _(alt, label_freq, mo, p_label_freq, pl):
+    label_diff = label_freq.join(p_label_freq, on="Label", how="inner")
+
+    label_diff = label_diff.with_columns(
+        Diff=((pl.col("Percent") - pl.col("Percent_right")) / pl.col("Percent") * 100)
+    )
+
+    print(label_diff.head())
+
+    average_label_diff = label_diff["Diff"].mean()
+    std_label_diff = label_diff["Diff"].std()
+    maximal_label_diff = max(
+        abs(label_diff["Diff"].max()), abs(label_diff["Diff"].min())
+    )
+
+    label_diff.select("Label", "Diff")
+
+    mo.ui.altair_chart(
+        alt.Chart(label_diff.to_pandas())
+        .mark_bar()
+        .encode(x="Label", y="Diff", color="Label")
+    )
+    return average_label_diff, label_diff, maximal_label_diff, std_label_diff
+
+
+@app.cell
+def _(average_label_diff, maximal_label_diff, mo, std_label_diff):
+    mo.md(
+        f"""The average difference in the distribution of labels between the original and padded sequences is **{average_label_diff:.2f}%**, with a standard deviation of **{std_label_diff:.4f}** and a maximal difference of **{maximal_label_diff:.2f}%**"""
     )
     return
 
