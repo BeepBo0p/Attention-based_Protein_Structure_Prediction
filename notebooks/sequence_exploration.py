@@ -228,7 +228,10 @@ def _(alt, mo, pl, sequences, unique_chars):
     }
 
     char_freq = pl.DataFrame(
-        {"Character": list(char_freq.keys()), "Frequency": list(char_freq.values())}
+        {
+            "Character": list(char_freq.keys()),
+            "Frequency": list(char_freq.values()),
+        }
     )
 
     # Get the sum of the frequencies
@@ -297,7 +300,7 @@ def _(alt, mo, padded_sequences, pl, unique_chars):
 @app.cell
 def _(mo):
     mo.md(
-        """### Percentage difference between the original and padded sequences in the distribution of characters"""
+        """### Difference between the original and padded sequences in the distribution of characters"""
     )
     return
 
@@ -306,10 +309,13 @@ def _(mo):
 def _(alt, char_freq, mo, pad_char_freq, pl):
     diff = char_freq.join(pad_char_freq, on="Character", how="inner")
 
-    diff = diff.with_columns(Diff=pl.col("Percent") - pl.col("Percent_right"))
+    diff = diff.with_columns(
+        Diff=(pl.col("Percent") - pl.col("Percent_right")) / pl.col("Percent") * 100
+    )
 
-    total_diff = diff["Diff"].sum()
-    print(f"Total Difference: {total_diff}")
+    average_diff = diff["Diff"].mean()
+    std_diff = diff["Diff"].std()
+    maximal_diff = max(abs(diff["Diff"].max()), abs(diff["Diff"].min()))
 
     diff.select("Character", "Diff")
 
@@ -318,7 +324,23 @@ def _(alt, char_freq, mo, pad_char_freq, pl):
         .mark_bar()
         .encode(x="Character", y="Diff", color="Character")
     )
-    return diff, total_diff
+    return average_diff, diff, maximal_diff, std_diff
+
+
+@app.cell
+def _(average_diff, maximal_diff, mo, std_diff):
+    mo.md(
+        f"The average difference in the distribution of characters between the original and padded sequences is **{average_diff:.2f}%**, with a standard deviation of **{std_diff:.4f}** and a maximal difference of **{maximal_diff:.2f}%**"
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""Overall, the distribution of characters in the padded sequences is similar to that of the original sequences. This indicates that the padding process does not significantly alter the distribution of characters in the sequences, except for certain outliers. We progress using the padded sequences for- training the machine learning model."""
+    )
+    return
 
 
 if __name__ == "__main__":
