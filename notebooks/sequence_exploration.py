@@ -84,7 +84,36 @@ def read_sequences():
 
 
 @app.cell
-def _(read_sequences):
+def pad_sequences():
+    def pad_sequences(sequences, max_length):
+        """
+        Pad sequences to the specified length by repeating the sequence.
+
+        Args:
+            sequences (List[str]): List of sequences to pad
+            max_length (int): Maximum length of the padded sequences
+
+        Returns:
+            List of padded sequences
+        """
+        padded_sequences = []
+
+        for sequence in sequences:
+            while len(sequence) < max_length:
+                sequence += sequence
+
+            padded_sequences.append(sequence[:max_length])
+
+        return padded_sequences
+    return (pad_sequences,)
+
+
+@app.cell
+def _(pad_sequences, read_sequences):
+    # =============================================================================
+    # Read Sequences
+    # =============================================================================
+
     data_path = "/home/beepboop/Desktop/Subjects/bioinfo_project_frfr/data/Protein_Secondary_Structure/protein-secondary-structure.train"
 
     sequences, labels = read_sequences(data_path)
@@ -94,7 +123,51 @@ def _(read_sequences):
         print(f"Label: \t\t{label}")
         print(f"Length: \t{len(seq)}")
         print()
-    return data_path, label, labels, seq, sequences
+
+    # =============================================================================
+    # Pad Sequences
+    # =============================================================================
+
+    max_length = max(len(seq) for seq in sequences)
+    padded_sequences = pad_sequences(sequences, max_length)
+    padded_labels = pad_sequences(labels, max_length)
+
+    print("\n\n============================================================\n\n")
+
+    for seq, padded_seq in zip(sequences[:5], padded_sequences[:5]):
+        print(f"Sequence: \t\t{seq}")
+        print(f"Padded Seq: \t{padded_seq}")
+        print(f"Length: \t\t{len(padded_seq)}")
+        print()
+
+    for label, padded_label in zip(labels[:5], padded_labels[:5]):
+        print(f"Label: \t\t\t{label}")
+        print(f"Padded Label: \t{padded_label}")
+        print(f"Length: \t\t{len(padded_label)}")
+        print()
+    return (
+        data_path,
+        label,
+        labels,
+        max_length,
+        padded_label,
+        padded_labels,
+        padded_seq,
+        padded_sequences,
+        seq,
+        sequences,
+    )
+
+
+@app.cell
+def _(labels, sequences):
+    # Extract the unique characters from the sequences
+    unique_chars = set("".join(sequences))
+    unique_labels = set("".join(labels))
+
+    print(f"Unique Characters: {unique_chars}")
+    print(f"Unique Labels: {unique_labels}")
+    return unique_chars, unique_labels
 
 
 if __name__ == "__main__":
