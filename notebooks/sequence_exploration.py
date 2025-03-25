@@ -8,6 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import polars as pl
+
     return mo, pl
 
 
@@ -59,18 +60,10 @@ def read_sequences():
             parts = parts.replace(" ", "")
 
             sequence = "".join(
-                [
-                    char
-                    for char, i in zip(parts, range(0, len(parts)))
-                    if i % 2 == 0
-                ]
+                [char for char, i in zip(parts, range(0, len(parts))) if i % 2 == 0]
             )
             label = "".join(
-                [
-                    char
-                    for char, i in zip(parts, range(0, len(parts)))
-                    if i % 2 == 1
-                ]
+                [char for char, i in zip(parts, range(0, len(parts))) if i % 2 == 1]
             )
 
             if len(sequence) != len(label):
@@ -80,6 +73,7 @@ def read_sequences():
             labels.append(label)
 
         return sequences, labels
+
     return (read_sequences,)
 
 
@@ -105,6 +99,7 @@ def pad_sequences():
             padded_sequences.append(sequence[:max_length])
 
         return padded_sequences
+
     return (pad_sequences,)
 
 
