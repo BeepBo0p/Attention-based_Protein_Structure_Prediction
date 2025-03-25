@@ -8,12 +8,25 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import polars as pl
+    import altair as alt
 
-    return mo, pl
+    return alt, mo, pl
 
 
 @app.cell
-def read_sequences():
+def _(mo):
+    mo.md(
+        """
+        # Exploratory Data Analysis
+
+        ## Raw data information
+        """
+    )
+    return
+
+
+@app.cell
+def function_declarations():
     def read_sequences(file_path):
         """
         Read sequences from a file, ignoring lines that begin with '#' or ' '.
@@ -74,11 +87,6 @@ def read_sequences():
 
         return sequences, labels
 
-    return (read_sequences,)
-
-
-@app.cell
-def pad_sequences():
     def pad_sequences(sequences, max_length):
         """
         Pad sequences to the specified length by repeating the sequence.
@@ -100,11 +108,11 @@ def pad_sequences():
 
         return padded_sequences
 
-    return (pad_sequences,)
+    return pad_sequences, read_sequences
 
 
 @app.cell
-def _(pad_sequences, read_sequences):
+def sequence_processing(pad_sequences, read_sequences):
     # =============================================================================
     # Read Sequences
     # =============================================================================
@@ -155,7 +163,21 @@ def _(pad_sequences, read_sequences):
 
 
 @app.cell
-def _(labels, sequences):
+def _(mo, sequences):
+    mo.md(f"Number of sequences: {len(sequences)}")
+    return
+
+
+@app.cell
+def _(mo, sequences):
+    mo.md(
+        f"Shortest sequence is {min(len(seq) for seq in sequences)} and longest is {max(len(seq) for seq in sequences)} chars long"
+    )
+    return
+
+
+@app.cell
+def data_analysis(labels, sequences):
     # Extract the unique characters from the sequences
     unique_chars = set("".join(sequences))
     unique_labels = set("".join(labels))
@@ -163,6 +185,140 @@ def _(labels, sequences):
     print(f"Unique Characters: {unique_chars}")
     print(f"Unique Labels: {unique_labels}")
     return unique_chars, unique_labels
+
+
+@app.cell
+def _(mo, unique_chars):
+    mo.md(f"There are {len(unique_chars)} unique characters in the sequences.")
+    return
+
+
+@app.cell
+def _(mo, unique_labels):
+    mo.md(f"And {len(unique_labels)} unique labels in the sequences.")
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """## Investigating the effect of data augmentation on the distribution of characters in the sequences"""
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""### Distribution of characters in the raw sequences""")
+    return
+
+
+@app.cell
+def _(alt, mo, pl, sequences, unique_chars):
+    # Create a frequency table for the characters in the sequences
+    char_freq = {char: 0 for char in unique_chars}
+
+    for sequence in sequences:
+        for char in sequence:
+            char_freq[char] += 1
+
+    char_freq = {
+        k: v
+        for k, v in sorted(char_freq.items(), key=lambda item: item[1], reverse=True)
+    }
+
+    char_freq = pl.DataFrame(
+        {"Character": list(char_freq.keys()), "Frequency": list(char_freq.values())}
+    )
+
+    # Get the sum of the frequencies
+    total_freq = char_freq["Frequency"].sum()
+
+    # Divide the frequency of each character by the total frequency to get the percentage
+    char_freq = char_freq.with_columns(Percent=pl.col("Frequency") / total_freq * 100)
+
+    char_freq.select("Character", "Percent")
+
+    mo.ui.altair_chart(
+        alt.Chart(char_freq.to_pandas())
+        .mark_bar()
+        .encode(x="Character", y="Percent", color="Character")
+    )
+    return char, char_freq, sequence, total_freq
+
+
+@app.cell
+def _(mo):
+    mo.md("""### Distribution of characters in the padded sequences""")
+    return
+
+
+@app.cell
+def _(alt, mo, padded_sequences, pl, unique_chars):
+    # Create a frequency table for the characters in the sequences
+    padded_char_freq = {pchar: 0 for pchar in unique_chars}
+
+    for p_sequence in padded_sequences:
+        for pchar in p_sequence:
+            padded_char_freq[pchar] += 1
+
+    pad_char_freq = {
+        k: v
+        for k, v in sorted(
+            padded_char_freq.items(), key=lambda item: item[1], reverse=True
+        )
+    }
+
+    pad_char_freq = pl.DataFrame(
+        {
+            "Character": list(padded_char_freq.keys()),
+            "Frequency": list(padded_char_freq.values()),
+        }
+    )
+
+    # Get the sum of the frequencies
+    pad_total_freq = pad_char_freq["Frequency"].sum()
+
+    # Divide the frequency of each character by the total frequency to get the percentage
+    pad_char_freq = pad_char_freq.with_columns(
+        Percent=pl.col("Frequency") / pad_total_freq * 100
+    )
+
+    pad_char_freq.select("Character", "Percent")
+
+    mo.ui.altair_chart(
+        alt.Chart(pad_char_freq.to_pandas())
+        .mark_bar()
+        .encode(x="Character", y="Percent", color="Character")
+    )
+    return p_sequence, pad_char_freq, pad_total_freq, padded_char_freq, pchar
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """### Percentage difference between the original and padded sequences in the distribution of characters"""
+    )
+    return
+
+
+@app.cell
+def _(alt, char_freq, mo, pad_char_freq, pl):
+    diff = char_freq.join(pad_char_freq, on="Character", how="inner")
+
+    diff = diff.with_columns(Diff=pl.col("Percent") - pl.col("Percent_right"))
+
+    total_diff = diff["Diff"].sum()
+    print(f"Total Difference: {total_diff}")
+
+    diff.select("Character", "Diff")
+
+    mo.ui.altair_chart(
+        alt.Chart(diff.to_pandas())
+        .mark_bar()
+        .encode(x="Character", y="Diff", color="Character")
+    )
+    return diff, total_diff
 
 
 if __name__ == "__main__":
