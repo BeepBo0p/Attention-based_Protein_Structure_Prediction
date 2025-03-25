@@ -9,16 +9,15 @@ def _():
     import marimo as mo
     import polars as pl
     import altair as alt
-
     return alt, mo, pl
 
 
 @app.cell
 def _(mo):
     mo.md(
-        """
+        r"""
         # Exploratory Data Analysis
-
+    
         ## Raw data information
         """
     )
@@ -87,6 +86,7 @@ def function_declarations():
 
         return sequences, labels
 
+
     def pad_sequences(sequences, max_length):
         """
         Pad sequences to the specified length by repeating the sequence.
@@ -107,7 +107,6 @@ def function_declarations():
             padded_sequences.append(sequence[:max_length])
 
         return padded_sequences
-
     return pad_sequences, read_sequences
 
 
@@ -201,15 +200,13 @@ def _(mo, unique_labels):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """## Investigating the effect of data augmentation on the distribution of characters in the sequences"""
-    )
+    mo.md(r"## Investigating the effect of data augmentation on the distribution of characters in the sequences")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md("""### Distribution of characters in the raw sequences""")
+    mo.md(r"### Distribution of characters in the raw sequences")
     return
 
 
@@ -223,8 +220,7 @@ def _(alt, mo, pl, sequences, unique_chars):
             char_freq[char] += 1
 
     char_freq = {
-        k: v
-        for k, v in sorted(char_freq.items(), key=lambda item: item[1], reverse=True)
+        k: v for k, v in sorted(char_freq.items(), key=lambda item: item[1], reverse=True)
     }
 
     char_freq = pl.DataFrame(
@@ -252,7 +248,7 @@ def _(alt, mo, pl, sequences, unique_chars):
 
 @app.cell
 def _(mo):
-    mo.md("""### Distribution of characters in the padded sequences""")
+    mo.md(r"### Distribution of characters in the padded sequences")
     return
 
 
@@ -267,9 +263,7 @@ def _(alt, mo, padded_sequences, pl, unique_chars):
 
     pad_char_freq = {
         k: v
-        for k, v in sorted(
-            padded_char_freq.items(), key=lambda item: item[1], reverse=True
-        )
+        for k, v in sorted(padded_char_freq.items(), key=lambda item: item[1], reverse=True)
     }
 
     pad_char_freq = pl.DataFrame(
@@ -299,9 +293,7 @@ def _(alt, mo, padded_sequences, pl, unique_chars):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """### Difference between the original and padded sequences in the distribution of characters"""
-    )
+    mo.md(r"### Difference between the original and padded sequences in the distribution of characters")
     return
 
 
@@ -337,23 +329,19 @@ def _(average_diff, maximal_diff, mo, std_diff):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""Overall, the distribution of characters in the padded sequences is similar to that of the original sequences. This indicates that the padding process does not significantly alter the distribution of characters in the sequences, except for certain outliers. We progress using the padded sequences for- training the machine learning model."""
-    )
+    mo.md(r"Overall, the distribution of characters in the padded sequences is similar to that of the original sequences. This indicates that the padding process does not significantly alter the distribution of characters in the sequences, except for certain outliers. We progress using the padded sequences for- training the machine learning model.")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""## Investigating the effect of data augmentation on the distribution of labels in the sequences"""
-    )
+    mo.md(r"## Investigating the effect of data augmentation on the distribution of labels in the sequences")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Distribution of Labels in the raw sequences""")
+    mo.md(r"### Distribution of Labels in the raw sequences")
     return
 
 
@@ -366,8 +354,7 @@ def _(alt, labels, mo, pl, unique_labels):
             label_freq[label_char] += 1
 
     label_freq = {
-        k: v
-        for k, v in sorted(label_freq.items(), key=lambda item: item[1], reverse=True)
+        k: v for k, v in sorted(label_freq.items(), key=lambda item: item[1], reverse=True)
     }
 
     label_freq = pl.DataFrame(
@@ -396,7 +383,7 @@ def _(alt, labels, mo, pl, unique_labels):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Distribution of Labels in the padded sequences""")
+    mo.md(r"### Distribution of Labels in the padded sequences")
     return
 
 
@@ -440,9 +427,7 @@ def _(alt, mo, padded_labels, pl, unique_labels):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""### Difference between the original and padded sequences in the distribution of labels"""
-    )
+    mo.md(r"### Difference between the original and padded sequences in the distribution of labels")
     return
 
 
@@ -458,9 +443,7 @@ def _(alt, label_freq, mo, p_label_freq, pl):
 
     average_label_diff = label_diff["Diff"].mean()
     std_label_diff = label_diff["Diff"].std()
-    maximal_label_diff = max(
-        abs(label_diff["Diff"].max()), abs(label_diff["Diff"].min())
-    )
+    maximal_label_diff = max(abs(label_diff["Diff"].max()), abs(label_diff["Diff"].min()))
 
     label_diff.select("Label", "Diff")
 
