@@ -1,9 +1,12 @@
 import json
+import time
+import os
 
 import numpy as np
 import polars as pl
 import torch as th
 import torchvision as tv
+import yaml
 
 
 # =======================================================
@@ -210,9 +213,7 @@ class GenomeTokenAttention(th.nn.Module):
 
         pos = np.arange(s)
         pos = self._sinusoidal_positional_embedding(s, 256).to(x.device)
-
         pos = pos.unsqueeze(0).expand(b, -1, -1)
-
         x = self.embedding(x) + pos
         x_res = x
         x, _ = self.mha(x, x, x)
@@ -267,6 +268,11 @@ def main():
     # Model Training
     # =======================================================
 
+    id = str(int(time.time()))
+    out_path = f"out/{id}"
+    os.makedirs(out_path, exist_ok=True)
+    print(f"Output Path: {out_path}")
+
     # Device
     device = th.device(
         "cuda"
@@ -295,13 +301,27 @@ def main():
     optimizer = th.optim.AdamW(model.parameters(), lr=0.001)
 
     # Early Stopping
-    patience = 5
+    patience = 20
     best_val_loss = np.inf
     counter = 0
 
+    train_info = {
+        "model": model.__class__.__name__,
+        "loss_fn": loss_fn.__class__.__name__,
+        "optimizer": optimizer.__class__.__name__,
+        "patience": patience,
+    }
+
+    train_stats = {
+        "train_loss": [],
+        "train_metric": [],
+        "val_loss": [],
+        "val_metric": [],
+    }
+
     try:
         # Training Loop
-        for epoch in range(100):
+        for epoch in range(1000):
             model.train()
 
             train_losses = []
@@ -375,6 +395,11 @@ def main():
                     print("Early Stopping")
                     break
 
+            train_stats["train_loss"].append(train_loss)
+            train_stats["train_metric"].append(train_metric)
+            train_stats["val_loss"].append(val_loss)
+            train_stats["val_metric"].append(val_metric)
+
     except KeyboardInterrupt:
         print("Training interrupted")
 
@@ -382,7 +407,13 @@ def main():
         raise e
 
     finally:
-        pass
+        # Save the training information as a json file
+        with open(out_path + "/train_info.yaml", "w") as f:
+            yaml.dump(train_info, f)
+
+        # Save the training statistics using polars
+        train_stats_df = pl.DataFrame(train_stats)
+        train_stats_df.write_csv(out_path + "/train_stats.csv")
 
     # =======================================================
     # Inference evaluation
@@ -445,21 +476,8 @@ def main():
 
     print(f"Average Prediction Accuracy: {np.mean(prediction_accuracies):.3f}")
 
-    for i, (seq, label, prediction, acc) in enumerate(
-        zip(
-            test_sequences,
-            test_sequences_labels,
-            predicted_labels,
-            prediction_accuracies,
-        )
-    ):
-        print(f"Sequence {i + 1}, Accuracy: {acc:.3f}")
-        print(f"Ground Truth: \t{label}")
-        print(f"Prediction: \t{prediction}")
-        print()
-
     # Save the predictions to a text file
-    with open("predictions.txt", "w") as f:
+    with open(out_path + "/predictions.txt", "w") as f:
         f.write(f"Average Prediction Accuracy: {np.mean(prediction_accuracies):.3f}\n")
         f.write("\n")
         for i, (seq, label, prediction, acc) in enumerate(
