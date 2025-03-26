@@ -1,8 +1,9 @@
 import json
+
+import numpy as np
 import polars as pl
 import torch as th
 import torchvision as tv
-import numpy as np
 
 
 # =======================================================
@@ -157,8 +158,10 @@ class GenomeTokenLSTM(th.nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers=2):
         super(GenomeTokenLSTM, self).__init__()
         self.embedding = th.nn.Embedding(20, input_size)
-        self.lstm = th.nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = th.nn.Linear(hidden_size, output_size)
+        self.lstm = th.nn.LSTM(
+            input_size, hidden_size, num_layers, batch_first=True, bidirectional=True
+        )
+        self.fc = th.nn.Linear(hidden_size * 2, output_size)
 
     def forward(self, x):
         b, s = x.shape
@@ -178,16 +181,45 @@ class GenomeTokenAttention(th.nn.Module):
         self.mha = th.nn.MultiheadAttention(
             embed_dim, num_heads=8, dropout=0.1, batch_first=True
         )
+        self.group_norm = th.nn.GroupNorm(8, embed_dim)
         self.mlps = th.nn.ModuleList(
             [th.nn.Linear(embed_dim, embed_dim) for _ in range(num_layers)]
         )
         self.fc = th.nn.Linear(embed_dim, output_size)
 
+    def _sinusoidal_positional_embedding(self, n_position, embed_dim):
+        pos_enc = np.array(
+            [
+                [
+                    pos / np.power(10000, 2 * (i // 2) / embed_dim)
+                    for i in range(embed_dim)
+                ]
+                if pos != 0
+                else np.zeros(embed_dim)
+                for pos in range(n_position)
+            ]
+        )
+
+        pos_enc[1:, 0::2] = np.sin(pos_enc[1:, 0::2])
+        pos_enc[1:, 1::2] = np.cos(pos_enc[1:, 1::2])
+
+        return th.from_numpy(pos_enc).float()
+
     def forward(self, x):
         b, s = x.shape
 
-        x = self.embedding(x)
+        pos = np.arange(s)
+        pos = self._sinusoidal_positional_embedding(s, 256).to(x.device)
+
+        pos = pos.unsqueeze(0).expand(b, -1, -1)
+
+        x = self.embedding(x) + pos
+        x_res = x
         x, _ = self.mha(x, x, x)
+        x = x + x_res
+        x = x.permute(0, 2, 1)
+        x = self.group_norm(x)
+        x = x.permute(0, 2, 1)
         x = th.nn.functional.relu(x)
         for mlp in self.mlps:
             x = mlp(x)
@@ -252,11 +284,7 @@ def main():
 
     # Model
     model = GenomeTokenLSTM(input_size, hidden_size, output_size, num_layers).to(device)
-    """
-    model = GenomeTokenAttention(256, hidden_size, output_size, num_layers).to(
-        device
-    )
-    """
+    model = GenomeTokenAttention(256, hidden_size, output_size, num_layers).to(device)
 
     # Loss Function
     loss_fn = tv.ops.focal_loss.sigmoid_focal_loss
@@ -264,7 +292,12 @@ def main():
     metric_fn = accuracy
 
     # Optimizer
-    optimizer = th.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = th.optim.AdamW(model.parameters(), lr=0.001)
+
+    # Early Stopping
+    patience = 5
+    best_val_loss = np.inf
+    counter = 0
 
     try:
         # Training Loop
@@ -324,7 +357,23 @@ def main():
             val_loss = np.mean(val_losses)
             val_metric = np.mean(val_metrics)
 
-            print(f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f}")
+            print(
+                f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f} | Patience: {patience - counter}"
+            )
+
+            # Early Stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                counter = 0
+
+                # Save the model
+                pass
+
+            else:
+                counter += 1
+                if counter >= patience:
+                    print("Early Stopping")
+                    break
 
     except KeyboardInterrupt:
         print("Training interrupted")
@@ -351,7 +400,8 @@ def main():
 
     # Perform prediction on the test split
     predicted_labels = []
-    for seq in test_sequences:
+    prediction_accuracies = []
+    for seq, label in zip(test_sequences, test_sequences_labels):
         # Convert the sequence to a tensor
         x = th.tensor(seq).long().unsqueeze(0).to(device)
 
@@ -359,6 +409,10 @@ def main():
         y_pred = model(x)
         predicted_label = th.argmax(y_pred, dim=-1).squeeze().cpu().numpy()
         predicted_labels.append(predicted_label)
+
+        # Get the prediction accuracy
+        prediction_accuracy = (predicted_label == label).mean()
+        prediction_accuracies.append(prediction_accuracy)
 
     if any(
         [len(seq) != len(label) for seq, label in zip(test_sequences, predicted_labels)]
@@ -389,20 +443,34 @@ def main():
         convert_sequence_to_string(seq, idx_to_label) for seq in predicted_labels
     ]
 
-    for i, (seq, label, prediction) in enumerate(
-        zip(test_sequences, test_sequences_labels, predicted_labels)
+    print(f"Average Prediction Accuracy: {np.mean(prediction_accuracies):.3f}")
+
+    for i, (seq, label, prediction, acc) in enumerate(
+        zip(
+            test_sequences,
+            test_sequences_labels,
+            predicted_labels,
+            prediction_accuracies,
+        )
     ):
-        print(f"Sequence {i + 1}")
+        print(f"Sequence {i + 1}, Accuracy: {acc:.3f}")
         print(f"Ground Truth: \t{label}")
         print(f"Prediction: \t{prediction}")
         print()
 
     # Save the predictions to a text file
     with open("predictions.txt", "w") as f:
-        for i, (seq, label, prediction) in enumerate(
-            zip(test_sequences, test_sequences_labels, predicted_labels)
+        f.write(f"Average Prediction Accuracy: {np.mean(prediction_accuracies):.3f}\n")
+        f.write("\n")
+        for i, (seq, label, prediction, acc) in enumerate(
+            zip(
+                test_sequences,
+                test_sequences_labels,
+                predicted_labels,
+                prediction_accuracies,
+            )
         ):
-            f.write(f"Sequence {i + 1}\n")
+            f.write(f"Sequence {i + 1}, Accuracy: {acc:.3f}\n")
             f.write(f"Ground Truth: \t{label}\n")
             f.write(f"Prediction: \t{prediction}\n")
             f.write("\n")
