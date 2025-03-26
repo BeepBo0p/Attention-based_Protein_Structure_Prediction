@@ -349,19 +349,16 @@ def main():
 
     print(f"Number of test sequences: {len(test_sequences)}")
 
-    # Perform autoregressive prediction on the test split
+    # Perform prediction on the test split
     predicted_labels = []
     for seq in test_sequences:
-        predicted_label = []
-        for i in range(len(seq)):
-            x = th.tensor(seq[i : i + 20]).to(device)
-            x = x.unsqueeze(0)
-            y_pred = model(x)
-            y_pred = th.argmax(y_pred, dim=-1)
-            y_pred = y_pred.squeeze(0)
-            predicted_label.append(y_pred[-1].item())
+        # Convert the sequence to a tensor
+        x = th.tensor(seq).long().unsqueeze(0).to(device)
 
-        predicted_labels.append(predicted_label[: len(seq)])
+        # Get the predicted label
+        y_pred = model(x)
+        predicted_label = th.argmax(y_pred, dim=-1).squeeze().cpu().numpy()
+        predicted_labels.append(predicted_label)
 
     if any(
         [len(seq) != len(label) for seq, label in zip(test_sequences, predicted_labels)]
