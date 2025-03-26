@@ -1,11 +1,14 @@
+import json
 import os
 import time
 
 import matplotlib.pyplot as plt
-import monai
-import monai.losses
+
+# import monai
+# import monai.losses
 import polars as pl
 import torch as th
+import torchvision as tv
 
 
 def preprocess_data(df_path):
@@ -48,8 +51,69 @@ def accuracy(y_pred, y_true):
     return (y_pred == y_true).float().mean()
 
 
+def precision(y_pred, y_true):
+    # Select the class with the highest probability
+    y_pred = th.argmax(y_pred, dim=-1)
+    y_true = th.argmax(y_true, dim=-1)
+
+    # Create a mask to ignore padding
+    y_real = th.zeros_like(y_pred) == y_true
+    y_real = y_real.float() == 0
+    y_real = y_real.float()
+
+    # Calculate Precision
+    tp = (y_pred == y_true).float() * y_real
+    tp = tp.sum(dim=-1)
+    fp = (y_pred != y_true).float() * y_real
+    fp = fp.sum(dim=-1)
+    precision = tp / (tp + fp + 1e-8)
+    return precision.mean()
+
+
+def recall(y_pred, y_true):
+    # Select the class with the highest probability
+    y_pred = th.argmax(y_pred, dim=-1)
+    y_true = th.argmax(y_true, dim=-1)
+
+    # Create a mask to ignore padding
+    y_real = th.zeros_like(y_pred) == y_true
+    y_real = y_real.float() == 0
+    y_real = y_real.float()
+
+    # Calculate Precision
+    tp = (y_pred == y_true).float() * y_real
+    tp = tp.sum(dim=-1)
+    fn = (y_pred != y_true).float() * y_real
+    fn = fn.sum(dim=-1)
+    recall = tp / (tp + fn + 1e-8)
+    return recall.mean()
+
+
 def f1_score(y_pred, y_true):
-    pass
+    # Select the class with the highest probability
+    y_pred = th.argmax(y_pred, dim=-1)
+    y_true = th.argmax(y_true, dim=-1)
+
+    # Create a mask to ignore padding
+    y_real = th.zeros_like(y_pred) == y_true
+    y_real = y_real.float() == 0
+    y_real = y_real.float()
+
+    # Calculate Precision
+    tp = (y_pred == y_true).float() * y_real
+    tp = tp.sum(dim=-1)
+    fp = (y_pred != y_true).float() * y_real
+    fp = fp.sum(dim=-1)
+    precision = tp / (tp + fp + 1e-8)
+
+    # Calculate Recall
+    fn = (y_pred != y_true).float() * y_real
+    fn = fn.sum(dim=-1)
+    recall = tp / (tp + fn + 1e-8)
+
+    # Calculate F1 Score
+    f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+    return f1.mean()
 
 
 def l2_regularization(model, device, lambda_=0.0001):
@@ -100,33 +164,50 @@ def main():
 
     # Create LSTM model
     lstm = th.nn.LSTM(
-        input_size=1, hidden_size=4, num_layers=2, batch_first=True, dropout=0.5
+        input_size=1, hidden_size=4, num_layers=8, batch_first=True, dropout=0.25
     ).to(device)
 
+    """
     bidirectional_lstm = th.nn.Sequential(
         th.nn.LSTM(
             input_size=1,
             hidden_size=4,
-            num_layers=2,
+            num_layers=8,
             batch_first=True,
-            dropout=0.5,
+            dropout=0.25,
             bidirectional=True,
         ),
         th.nn.Linear(8, 4),
     ).to(device)
+    """
 
-    model = bidirectional_lstm
+    model = lstm
 
     # Create optimizer
     optimizer = th.optim.AdamW(model.parameters(), lr=0.001)
-    criterion = monai.losses.dice.DiceFocalLoss()
+    criterion = (
+        tv.ops.focal_loss.sigmoid_focal_loss
+    )  # th.nn.CrossEntropyLoss() #monai.losses.dice.DiceCELoss()
     regularizer = None  # l2_regularization
-    metric = accuracy
-    epochs = 500
+    metric = f1_score
+    epochs = int(1e6)
     best_test_loss = float("inf")
     best_test_metric = -1
     patience = epochs  # int(epochs * 0.01)
     counter = 0
+
+    train_settings = {
+        "model": model.__class__.__name__,
+        "optimizer": optimizer.__class__.__name__,
+        "criterion": criterion.__class__.__name__
+        if isinstance(criterion, th.nn.Module)
+        else criterion.__name__,
+        "regularizer": regularizer.__name__ if regularizer else None,
+        "metric": metric.__name__,
+        "epochs": epochs,
+        "patience": patience,
+        "counter": counter,
+    }
 
     train_info = {
         "Epoch": [],
@@ -142,49 +223,23 @@ def main():
     out_dir = f"out/{model.__class__.__name__}/{id}"
     os.makedirs(out_dir, exist_ok=True)
 
-    # Train model
-    for epoch in range(epochs):
-        # Train
-        model.train()
-        train_loss = 0
-        train_metric = 0
-        for X, y in train_loader:
-            X, y = X.to(device), y.to(device)
-            optimizer.zero_grad()
+    # Save training settings as yaml
+    import yaml
 
-            # If the model is bidirectional we need to handle the hidden state
-            if isinstance(model, th.nn.Sequential):
-                for layer in model:
-                    if isinstance(layer, th.nn.LSTM):
-                        out, _ = layer(X)
-                    else:
-                        out = layer(out)
+    with open(out_dir + "/train_settings.yaml", "w") as file:
+        yaml.dump(train_settings, file)
 
-            # Otherwise, ram data through the model as usual
-            else:
-                out, _ = model(X)
-            loss = criterion(out, y)
-            if regularizer:
-                loss += regularizer(model, device)
-            metric_value = metric(out, y)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-            train_metric += metric_value.item()
-        train_loss /= len(train_loader)
-        train_metric /= len(train_loader)
-        print(
-            f"Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss:.3f}, Train Metric: {train_metric:.3f}",
-            end=", ",
-        )
-
-        # Test
-        model.eval()
-        test_loss = 0
-        test_metric = 0
-        with th.no_grad():
-            for X, y in test_loader:
+    try:
+        # Train model
+        for epoch in range(epochs):
+            # Train
+            model.train()
+            train_loss = 0
+            train_metric = 0
+            for X, y in train_loader:
                 X, y = X.to(device), y.to(device)
+                optimizer.zero_grad()
+
                 # If the model is bidirectional we need to handle the hidden state
                 if isinstance(model, th.nn.Sequential):
                     for layer in model:
@@ -192,41 +247,90 @@ def main():
                             out, _ = layer(X)
                         else:
                             out = layer(out)
+                if isinstance(model, th.nn.LSTM):
+                    out, _ = model(X)
+
                 # Otherwise, ram data through the model as usual
                 else:
-                    out, _ = model(X)
-                loss = criterion(out, y)
+                    out = model(X)
+                loss = criterion(
+                    out, y, reduction="mean"
+                )  # if hasattr(criterion, "reduction") else criterion(out, y)
+                if regularizer:
+                    loss += regularizer(model, device)
                 metric_value = metric(out, y)
-                test_loss += loss.item()
-                test_metric += metric_value.item()
-        test_loss /= len(test_loader)
-        test_metric /= len(test_loader)
-        print(f"Test Loss: {test_loss:.3f}, Test Metric: {test_metric:.3f}", end=", ")
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+                train_metric += metric_value.item()
+            train_loss /= len(train_loader)
+            train_metric /= len(train_loader)
+            print(
+                f"Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss:.3f}, Train Metric: {train_metric:.3f}",
+                end=", ",
+            )
 
-        # Early stopping
-        if test_metric > best_test_metric:
-            best_test_metric = test_metric
-            counter = 0
+            # Test
+            model.eval()
+            test_loss = 0
+            test_metric = 0
+            with th.no_grad():
+                for X, y in test_loader:
+                    X, y = X.to(device), y.to(device)
+                    # If the model is bidirectional we need to handle the hidden state
+                    if isinstance(model, th.nn.Sequential):
+                        for layer in model:
+                            if isinstance(layer, th.nn.LSTM):
+                                out, _ = layer(X)
+                            else:
+                                out = layer(out)
+                    # Otherwise, ram data through the model as usual
+                    if isinstance(model, th.nn.LSTM):
+                        out, _ = model(X)
+                    else:
+                        out = model(X)
+                    loss = criterion(
+                        out, y, reduction="mean"
+                    )  # if hasattr(criterion, "reduction") else criterion(out, y)
+                    metric_value = metric(out, y)
+                    test_loss += loss.item()
+                    test_metric += metric_value.item()
+            test_loss /= len(test_loader)
+            test_metric /= len(test_loader)
+            print(
+                f"Test Loss: {test_loss:.3f}, Test Metric: {test_metric:.3f}", end=", "
+            )
 
-            # Save best model
-            th.save(model.state_dict(), out_dir + "/model.pth")
+            # Early stopping
+            if test_metric > best_test_metric:
+                best_test_metric = test_metric
+                counter = 0
 
-        else:
-            counter += 1
-            if counter >= patience:
-                print("Early stopping")
-                break
+                # Save best model
+                th.save(model.state_dict(), out_dir + "/model.pth")
 
-        print(f"Best Test Metric: {best_test_metric:.3f} ({counter}/{patience})")
+            else:
+                counter += 1
+                if counter >= patience:
+                    print("Early stopping")
+                    break
 
-        # Save training info
-        train_info["Epoch"].append(epoch)
-        train_info["Train Loss"].append(train_loss)
-        train_info["Train Metric"].append(train_metric)
-        train_info["Test Loss"].append(test_loss)
-        train_info["Test Metric"].append(test_metric)
-        train_info["Best Test Loss"].append(best_test_loss)
-        train_info["Counter"].append(counter)
+            print(f"Best Test Metric: {best_test_metric:.3f} ({counter}/{patience})")
+
+            # Save training info
+            train_info["Epoch"].append(epoch)
+            train_info["Train Loss"].append(train_loss)
+            train_info["Train Metric"].append(train_metric)
+            train_info["Test Loss"].append(test_loss)
+            train_info["Test Metric"].append(test_metric)
+            train_info["Best Test Loss"].append(best_test_loss)
+            train_info["Counter"].append(counter)
+
+    except KeyboardInterrupt:
+        print("Training interrupted")
+
+    except Exception as e:
+        raise e
 
     # Save training info
     train_info = pl.DataFrame(train_info)
@@ -289,6 +393,75 @@ def main():
 
     # Load best model
     model.load_state_dict(th.load(out_dir + "/model.pth"))
+
+    # Perform inference on the test set
+    predictions = []
+    truths = []
+
+    for X, y in test_loader:
+        X, y = X.to(device), y.to(device)
+        # If the model is bidirectional we need to handle the hidden state
+        if isinstance(model, th.nn.Sequential):
+            for layer in model:
+                if isinstance(layer, th.nn.LSTM):
+                    out, _ = layer(X)
+                else:
+                    out = layer(out)
+        # Otherwise, ram data through the model as usual
+        else:
+            out, _ = model(X)
+        predictions.append(out)
+        truths.append(y)
+
+    predictions = th.cat(predictions)
+    truths = th.cat(truths)
+
+    predictions = th.argmax(predictions, dim=-1)
+    truths = th.argmax(truths, dim=-1)
+
+    # Convert to numpy
+    predictions = predictions.cpu().numpy()
+    truths = truths.cpu().numpy()
+
+    # Subtract 1 to get the original labels
+    predictions -= 1
+    truths -= 1
+
+    sequences = []
+
+    for i in range(predictions.shape[0]):
+        # Get the index of the first -1
+        end = list(truths[i]).index(-1)
+
+        # Get the sequence and append it to the list
+        sequences.append(predictions[i][:end])
+        gt = truths[i][:end]
+
+        print(f"Sequence: {i}")
+        print(f"Prediction: {sequences[-1]}")
+        print(f"Truth: {gt}")
+        print()
+
+    # Convert the sequences back to strings using the label_to_idx mapping in data/
+    with open(data_path + "label_to_idx.json", "r") as file:
+        label_to_idx = json.load(file)
+
+    # Invert the mapping
+    idx_to_label = {str(v): k for k, v in label_to_idx.items()}
+
+    # Add the padding character
+    idx_to_label["-1"] = "-"
+
+    # Convert the sequences to strings
+    sequences = [[idx_to_label[str(idx)] for idx in sequence] for sequence in sequences]
+    # gt = [[idx_to_label[idx] for idx in sequence] for sequence in gt]
+
+    # Print the sequences
+    for i, sequence in enumerate(sequences):
+        print(f"Sequence: {i}")
+        print(f"Prediction: {''.join(sequence)}")
+        # print(f"Truth: {''.join(gt[i])}")
+        print()
 
 
 if __name__ == "__main__":
