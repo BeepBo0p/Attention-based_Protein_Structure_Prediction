@@ -1,3 +1,4 @@
+import json
 import polars as pl
 import torch as th
 import torchvision as tv
@@ -11,6 +12,10 @@ def accuracy(y_pred, y_true):
     y_pred = th.argmax(y_pred, dim=1)
     y_true = th.argmax(y_true, dim=1)
     return th.mean((y_pred == y_true).float())
+
+
+def convert_sequence_to_string(sequence, mapping):
+    return "".join([mapping[seq] for seq in sequence])
 
 
 # =======================================================
@@ -60,14 +65,6 @@ def preprocess_data(df_path):
 
     if len(X) != len(Y):
         raise ValueError("Input and output sequences must have the same length")
-
-    # Print the number of unique values in the sequence
-    print(f"Unique values in X: {len(np.unique(X))}")
-    print(f"Unique values in Y: {len(np.unique(Y))}")
-
-    # Print the number of unique values in the sequence
-    print(f"Unique values in X: {np.unique(X)}")
-    print(f"Unique values in Y: {np.unique(Y)}")
 
     return human_readable, X, Y, length
 
@@ -217,11 +214,6 @@ def main():
         data_path + test_file
     )
 
-    """
-    print(train_human_readable)
-    print(test_human_readable)
-    """
-
     # Set train-val split
     train_val_split = 0.8
     # Create Dataset
@@ -234,38 +226,10 @@ def main():
         ],
     )
 
-    test_dataset = GenomeTokenDataset(test_X, test_y, test_length)
-
-    """
-    train_first = train_dataset[0]
-    test_first = test_dataset[0]
-
-    print(f"Train Dataset: {len(train_dataset)}")
-    print(f"Test Dataset: {len(test_dataset)}")
-    print(
-        f"First Element Shapes (train): {train_first[0].shape}, {train_first[1].shape}"
-    )
-    print(f"First Element Shapes (test): {test_first[0].shape}, {test_first[1].shape}")
-    """
-
     train_dataloader = th.utils.data.DataLoader(
         train_dataset, batch_size=32, shuffle=True
     )
-    test_dataloader = th.utils.data.DataLoader(
-        test_dataset, batch_size=32, shuffle=False
-    )
-
-    """
-    for x, y in train_dataloader:
-        print(x.shape)
-        print(y.shape)
-        break
-
-    for x, y in test_dataloader:
-        print(x.shape)
-        print(y.shape)
-        break
-    """
+    val_dataloader = th.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
 
     # =======================================================
     # Model Training
@@ -294,17 +258,6 @@ def main():
     )
     """
 
-    """
-    # Push a tensor through the model
-    x = th.randint(0, 20, (32, 20)).to(device)
-    y = model(x)
-    
-    print(x.shape)
-    print(y.shape)
-    
-    exit()
-    """
-
     # Loss Function
     loss_fn = tv.ops.focal_loss.sigmoid_focal_loss
     loss_fn = th.nn.CrossEntropyLoss()
@@ -313,46 +266,17 @@ def main():
     # Optimizer
     optimizer = th.optim.Adam(model.parameters(), lr=0.001)
 
-    # Training Loop
-    for epoch in range(100):
-        model.train()
+    try:
+        # Training Loop
+        for epoch in range(100):
+            model.train()
 
-        train_losses = []
-        train_metrics = []
+            train_losses = []
+            train_metrics = []
 
-        for x, y in train_dataloader:
-            x, y = x.to(device), y.to(device)
-            optimizer.zero_grad()
-            y_pred = model(x)
-            if isinstance(loss_fn, th.nn.CrossEntropyLoss):
-                loss = loss_fn(y_pred, y)
-            elif callable(loss_fn):
-                loss = loss_fn(y_pred, y, alpha=0.25, gamma=2.0, reduction="mean")
-            else:
-                loss = loss_fn(y_pred, y)
-            loss.backward()
-            optimizer.step()
-
-            metric = metric_fn(y_pred, y)
-
-            train_losses.append(loss.item())
-            train_metrics.append(metric.item())
-
-        train_loss = np.mean(train_losses)
-        train_metric = np.mean(train_metrics)
-
-        print(
-            f"Epoch: {epoch} | Train , Loss: {train_loss:.3f}, Acc: {train_metric:.3f}",
-            end=" | ",
-        )
-
-        model.eval()
-        test_losses = []
-        test_metrics = []
-
-        with th.no_grad():
-            for x, y in test_dataloader:
+            for x, y in train_dataloader:
                 x, y = x.to(device), y.to(device)
+                optimizer.zero_grad()
                 y_pred = model(x)
                 if isinstance(loss_fn, th.nn.CrossEntropyLoss):
                     loss = loss_fn(y_pred, y)
@@ -360,15 +284,131 @@ def main():
                     loss = loss_fn(y_pred, y, alpha=0.25, gamma=2.0, reduction="mean")
                 else:
                     loss = loss_fn(y_pred, y)
+                loss.backward()
+                optimizer.step()
+
                 metric = metric_fn(y_pred, y)
 
-                test_losses.append(loss.item())
-                test_metrics.append(metric.item())
+                train_losses.append(loss.item())
+                train_metrics.append(metric.item())
 
-        test_loss = np.mean(test_losses)
-        test_metric = np.mean(test_metrics)
+            train_loss = np.mean(train_losses)
+            train_metric = np.mean(train_metrics)
 
-        print(f"Test , Loss: {test_loss:.3f}, Acc: {test_metric:.3f}")
+            print(
+                f"Epoch: {epoch} | Train , Loss: {train_loss:.3f}, Acc: {train_metric:.3f}",
+                end=" | ",
+            )
+
+            model.eval()
+            val_losses = []
+            val_metrics = []
+
+            with th.no_grad():
+                for x, y in val_dataloader:
+                    x, y = x.to(device), y.to(device)
+                    y_pred = model(x)
+                    if isinstance(loss_fn, th.nn.CrossEntropyLoss):
+                        loss = loss_fn(y_pred, y)
+                    elif callable(loss_fn):
+                        loss = loss_fn(
+                            y_pred, y, alpha=0.25, gamma=2.0, reduction="mean"
+                        )
+                    else:
+                        loss = loss_fn(y_pred, y)
+                    metric = metric_fn(y_pred, y)
+
+                    val_losses.append(loss.item())
+                    val_metrics.append(metric.item())
+
+            val_loss = np.mean(val_losses)
+            val_metric = np.mean(val_metrics)
+
+            print(f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f}")
+
+    except KeyboardInterrupt:
+        print("Training interrupted")
+
+    except Exception as e:
+        raise e
+
+    finally:
+        pass
+
+    # =======================================================
+    # Inference evaluation
+    # =======================================================
+
+    # Split the test dataset into its constituent sequences
+    test_sequences = []
+    test_sequences_labels = []
+
+    for i, length in enumerate(test_length):
+        test_sequences.append(test_X[i : i + length])
+        test_sequences_labels.append(test_y[i : i + length])
+
+    print(f"Number of test sequences: {len(test_sequences)}")
+
+    # Perform autoregressive prediction on the test split
+    predicted_labels = []
+    for seq in test_sequences:
+        predicted_label = []
+        for i in range(len(seq)):
+            x = th.tensor(seq[i : i + 20]).to(device)
+            x = x.unsqueeze(0)
+            y_pred = model(x)
+            y_pred = th.argmax(y_pred, dim=-1)
+            y_pred = y_pred.squeeze(0)
+            predicted_label.append(y_pred[-1].item())
+
+        predicted_labels.append(predicted_label[: len(seq)])
+
+    if any(
+        [len(seq) != len(label) for seq, label in zip(test_sequences, predicted_labels)]
+    ):
+        raise ValueError(
+            "The predicted labels and test sequences must have the same length"
+        )
+
+    # Load in character mapping and label mapping
+    with open("data/Protein_Secondary_Structure/char_to_idx.json", "r") as f:
+        char_mapping = json.load(f)
+
+    with open("data/Protein_Secondary_Structure/label_to_idx.json", "r") as f:
+        label_mapping = json.load(f)
+
+    # Reverse the mapping
+    idx_to_char = {v: k for k, v in char_mapping.items()}
+    idx_to_label = {v: k for k, v in label_mapping.items()}
+
+    # Convert the sequences to strings
+    test_sequences = [
+        convert_sequence_to_string(seq, idx_to_char) for seq in test_sequences
+    ]
+    test_sequences_labels = [
+        convert_sequence_to_string(seq, idx_to_label) for seq in test_sequences_labels
+    ]
+    predicted_labels = [
+        convert_sequence_to_string(seq, idx_to_label) for seq in predicted_labels
+    ]
+
+    for i, (seq, label, prediction) in enumerate(
+        zip(test_sequences, test_sequences_labels, predicted_labels)
+    ):
+        print(f"Sequence {i + 1}")
+        print(f"Ground Truth: \t{label}")
+        print(f"Prediction: \t{prediction}")
+        print()
+
+    # Save the predictions to a text file
+    with open("predictions.txt", "w") as f:
+        for i, (seq, label, prediction) in enumerate(
+            zip(test_sequences, test_sequences_labels, predicted_labels)
+        ):
+            f.write(f"Sequence {i + 1}\n")
+            f.write(f"Ground Truth: \t{label}\n")
+            f.write(f"Prediction: \t{prediction}\n")
+            f.write("\n")
 
 
 if __name__ == "__main__":
