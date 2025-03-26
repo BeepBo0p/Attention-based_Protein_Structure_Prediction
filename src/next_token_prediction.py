@@ -26,9 +26,15 @@ def preprocess_data(df_path):
     if len(X) != len(Y) or len(X) != len(length):
         raise ValueError("Input and output sequences must have the same length")
 
-    for idx, x, y in zip(length, X, Y):
-        x = x[:idx]
-        y = y[:idx]
+    for i, (x, y) in enumerate(zip(X, Y)):
+        # Find the first negative value in the sequence
+        idx = next((i for i, x in enumerate(x) if x < 0), None)
+        if idx is not None:
+            x = x[:idx]
+            y = y[:idx]
+
+            X[i] = x
+            Y[i] = y
 
     if any([len(x) != len(y) for x, y in zip(X, Y)]):
         raise ValueError("Input and output sequences must have the same length")
@@ -44,7 +50,8 @@ def preprocess_data(df_path):
 
 
 class GenomeTokenDataset(th.utils.data.Dataset):
-    def __init__(self, X, Y, indice_information, sequence_length=20):
+    def __init__(self, X, Y, indice_information, sequence_length=20, one_hot=True):
+        super(GenomeTokenDataset, self).__init__()
         self.indice_information = indice_information
         self.sequence_length = sequence_length
 
@@ -71,15 +78,31 @@ class GenomeTokenDataset(th.utils.data.Dataset):
 
         for i, row in enumerate(self.genome_sequence):
             if len(row) != sequence_length:
+                print("Genome sequence checks failed")
                 print(row)
                 print(len(row))
                 print(f"Index: {i} / {len(self.genome_sequence)}")
                 exit()
 
+            # If any sequence value is negative, print the row
+            if any([sequence < 0 for sequence in row]):
+                print("Genome sequence checks failed")
+                print(row)
+                print(f"Index: {i} / {len(self.genome_sequence)}")
+                exit()
+
         for i, row in enumerate(self.genome_label):
             if len(row) != sequence_length:
+                print("Genome label checks failed")
                 print(row)
                 print(len(row))
+                print(f"Index: {i} / {len(self.genome_label)}")
+                exit()
+
+            # If any label value is negative, print the row
+            if any([label < 0 for label in row]):
+                print("Genome label checks failed")
+                print(row)
                 print(f"Index: {i} / {len(self.genome_label)}")
                 exit()
 
@@ -88,6 +111,12 @@ class GenomeTokenDataset(th.utils.data.Dataset):
 
         self.genome_sequence = th.tensor(self.genome_sequence, dtype=th.float32)
         self.genome_label = th.tensor(self.genome_label, dtype=th.float32)
+
+        # Convert labels to one-hot encoding
+        if one_hot:
+            self.genome_label = th.nn.functional.one_hot(
+                th.tensor(self.genome_label, dtype=th.int64), num_classes=3
+            )
 
     def __len__(self):
         return len(self.genome_sequence)
@@ -147,6 +176,10 @@ def main():
         print(x.shape)
         print(y.shape)
         break
+
+    # =======================================================
+    # Model Training
+    # =======================================================
 
 
 if __name__ == "__main__":
