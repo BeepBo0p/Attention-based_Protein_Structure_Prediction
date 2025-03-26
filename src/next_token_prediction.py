@@ -23,44 +23,71 @@ def preprocess_data(df_path):
     Y = [list(row) for row in Y]
     length = [int(row) for row in length]
 
+    if len(X) != len(Y) or len(X) != len(length):
+        raise ValueError("Input and output sequences must have the same length")
+
     for idx, x, y in zip(length, X, Y):
         x = x[:idx]
         y = y[:idx]
+
+    if any([len(x) != len(y) for x, y in zip(X, Y)]):
+        raise ValueError("Input and output sequences must have the same length")
 
     # Concatenate all sequences
     X = np.array([item for sublist in X for item in sublist])
     Y = np.array([item for sublist in Y for item in sublist])
 
-    # Convert to tensors
-    X = th.tensor(X)
-    Y = th.tensor(Y)
+    if len(X) != len(Y):
+        raise ValueError("Input and output sequences must have the same length")
 
-    print(X.shape, Y.shape)
-
-    return human_readable, X, y, length
+    return human_readable, X, Y, length
 
 
 class GenomeTokenDataset(th.utils.data.Dataset):
-    def __init__(self, X, y, indice_information, sequence_length=100):
-        self.X = X
-        self.y = y
+    def __init__(self, X, Y, indice_information, sequence_length=20):
         self.indice_information = indice_information
         self.sequence_length = sequence_length
 
         self.genome_sequence = []
         self.genome_label = []
 
-        for i, (x, y) in enumerate(zip(X, y)):
+        for i, _ in enumerate(X):
             indices_in_sequence = np.arange(i, i + sequence_length)
 
-            if any([idx >= len(x) for idx in indices_in_sequence]):
+            if any([idx >= len(X) for idx in indices_in_sequence]):
                 continue
 
             if any([idx in indice_information for idx in indices_in_sequence[1:]]):
                 continue
 
-            self.genome_sequence.append(x[indices_in_sequence])
-            self.genome_label.append(y[indices_in_sequence])
+            lower = np.min(indices_in_sequence)
+            upper = np.max(indices_in_sequence) + 1
+
+            if upper - lower != sequence_length:
+                continue
+
+            self.genome_sequence.append(X[lower:upper])
+            self.genome_label.append(Y[lower:upper])
+
+        for i, row in enumerate(self.genome_sequence):
+            if len(row) != sequence_length:
+                print(row)
+                print(len(row))
+                print(f"Index: {i} / {len(self.genome_sequence)}")
+                exit()
+
+        for i, row in enumerate(self.genome_label):
+            if len(row) != sequence_length:
+                print(row)
+                print(len(row))
+                print(f"Index: {i} / {len(self.genome_label)}")
+                exit()
+
+        self.genome_sequence = np.array(self.genome_sequence)
+        self.genome_label = np.array(self.genome_label)
+
+        self.genome_sequence = th.tensor(self.genome_sequence, dtype=th.float32)
+        self.genome_label = th.tensor(self.genome_label, dtype=th.float32)
 
     def __len__(self):
         return len(self.genome_sequence)
@@ -94,8 +121,32 @@ def main():
     train_dataset = GenomeTokenDataset(train_X, train_y, train_length)
     test_dataset = GenomeTokenDataset(test_X, test_y, test_length)
 
+    train_first = train_dataset[0]
+    test_first = test_dataset[0]
+
     print(f"Train Dataset: {len(train_dataset)}")
     print(f"Test Dataset: {len(test_dataset)}")
+    print(
+        f"First Element Shapes (train): {train_first[0].shape}, {train_first[1].shape}"
+    )
+    print(f"First Element Shapes (test): {test_first[0].shape}, {test_first[1].shape}")
+
+    train_dataloader = th.utils.data.DataLoader(
+        train_dataset, batch_size=32, shuffle=True
+    )
+    test_dataloader = th.utils.data.DataLoader(
+        test_dataset, batch_size=32, shuffle=False
+    )
+
+    for x, y in train_dataloader:
+        print(x.shape)
+        print(y.shape)
+        break
+
+    for x, y in test_dataloader:
+        print(x.shape)
+        print(y.shape)
+        break
 
 
 if __name__ == "__main__":
