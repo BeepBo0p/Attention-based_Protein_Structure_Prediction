@@ -116,11 +116,33 @@ def f1_score(y_pred, y_true):
     return f1.mean()
 
 
-def l2_regularization(model, device, lambda_=0.0001):
+def l2_regularization(model, device, lambda_=0.01):
     l2_reg = th.tensor(0.0).to(device)
+    nr_params = 0
     for param in model.parameters():
         l2_reg += th.norm(param)
-    return lambda_ * l2_reg
+        nr_params += 1
+    return lambda_ * l2_reg / nr_params
+
+
+def l1_regularization(model, device, lambda_=0.01):
+    l1_reg = th.tensor(0.0).to(device)
+    nr_params = 0
+    for param in model.parameters():
+        l1_reg += th.norm(param, p=1)
+        nr_params += 1
+    return lambda_ * l1_reg / nr_params
+
+
+def lmax_regularization(model, device, lambda_=0.01):
+    lmax_reg = th.tensor(0.0).to(device)
+    for param in model.parameters():
+        lmax_reg = (
+            th.norm(param, p=float("inf"))
+            if th.norm(param, p=float("inf")) > lmax_reg
+            else lmax_reg
+        )
+    return lambda_ * lmax_reg
 
 
 def main():
@@ -188,7 +210,7 @@ def main():
     criterion = (
         tv.ops.focal_loss.sigmoid_focal_loss
     )  # th.nn.CrossEntropyLoss() #monai.losses.dice.DiceCELoss()
-    regularizer = None  # l2_regularization
+    regularizer = lmax_regularization  # l2_regularization
     metric = f1_score
     epochs = int(1e6)
     best_test_loss = float("inf")
@@ -255,6 +277,8 @@ def main():
                     out = model(X)
                 loss = criterion(
                     out, y, reduction="mean"
+                ) + 0.001 * th.nn.CrossEntropyLoss()(
+                    out, y
                 )  # if hasattr(criterion, "reduction") else criterion(out, y)
                 if regularizer:
                     loss += regularizer(model, device)
@@ -291,6 +315,8 @@ def main():
                         out = model(X)
                     loss = criterion(
                         out, y, reduction="mean"
+                    ) + 0.001 * th.nn.CrossEntropyLoss()(
+                        out, y
                     )  # if hasattr(criterion, "reduction") else criterion(out, y)
                     metric_value = metric(out, y)
                     test_loss += loss.item()
@@ -397,6 +423,10 @@ def main():
     # Perform inference on the test set
     predictions = []
     truths = []
+    avg_precision = []
+    avg_recall = []
+    avg_f1 = []
+    avg_accuracy = []
 
     for X, y in test_loader:
         X, y = X.to(device), y.to(device)
@@ -413,6 +443,21 @@ def main():
         predictions.append(out)
         truths.append(y)
 
+        avg_precision.append(precision(out, y))
+        avg_recall.append(recall(out, y))
+        avg_f1.append(f1_score(out, y))
+        avg_accuracy.append(accuracy(out, y))
+
+    avg_precision = th.stack(avg_precision).mean()
+    avg_recall = th.stack(avg_recall).mean()
+    avg_f1 = th.stack(avg_f1).mean()
+    avg_accuracy = th.stack(avg_accuracy).mean()
+
+    print(f"Precision: {avg_precision:.3f}")
+    print(f"Recall: {avg_recall:.3f}")
+    print(f"F1 Score: {avg_f1:.3f}")
+    print(f"Accuracy: {avg_accuracy:.3f}")
+
     predictions = th.cat(predictions)
     truths = th.cat(truths)
 
@@ -428,6 +473,7 @@ def main():
     truths -= 1
 
     sequences = []
+    true_sequences = []
 
     for i in range(predictions.shape[0]):
         # Get the index of the first -1
@@ -435,6 +481,7 @@ def main():
 
         # Get the sequence and append it to the list
         sequences.append(predictions[i][:end])
+        true_sequences.append(truths[i][:end])
         gt = truths[i][:end]
 
         print(f"Sequence: {i}")
@@ -454,13 +501,15 @@ def main():
 
     # Convert the sequences to strings
     sequences = [[idx_to_label[str(idx)] for idx in sequence] for sequence in sequences]
-    # gt = [[idx_to_label[idx] for idx in sequence] for sequence in gt]
+    true_sequences = [
+        [idx_to_label[str(idx)] for idx in sequence] for sequence in true_sequences
+    ]
 
     # Print the sequences
     for i, sequence in enumerate(sequences):
         print(f"Sequence: {i}")
-        print(f"Prediction: {''.join(sequence)}")
-        # print(f"Truth: {''.join(gt[i])}")
+        print(f"Prediction: \t{''.join(sequence)}")
+        print(f"Truth: \t\t{''.join(true_sequences[i])}")
         print()
 
 
