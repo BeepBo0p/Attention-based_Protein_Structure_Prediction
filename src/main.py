@@ -2,9 +2,10 @@ import os
 import time
 
 import matplotlib.pyplot as plt
+import monai
+import monai.losses
 import polars as pl
 import torch as th
-import torchvision as tv
 
 
 def preprocess_data(df_path):
@@ -29,16 +30,18 @@ def preprocess_data(df_path):
 
     return human_readable, X, y
 
+
 def accuracy(y_pred, y_true):
     # Select the class with the highest probability
     y_pred = th.argmax(y_pred, dim=-1)
     y_true = th.argmax(y_true, dim=-1)
-    
+
+    # Create a mask to ignore padding
     y_real = th.zeros_like(y_pred) == y_true
     y_real = y_real.float() == 0
     y_real = y_real.float()
-    
-    # Calculate accuracy 
+
+    # Calculate accuracy
     accuracy = (y_pred == y_true).float() * y_real
     accuracy = accuracy.sum(dim=-1) / y_real.sum(dim=-1)
     return accuracy.float().mean()
@@ -49,7 +52,7 @@ def f1_score(y_pred, y_true):
     pass
 
 
-def l2_regularization(model, device, lambda_=0.01):
+def l2_regularization(model, device, lambda_=0.0001):
     l2_reg = th.tensor(0.0).to(device)
     for param in model.parameters():
         l2_reg += th.norm(param)
@@ -116,12 +119,13 @@ def main():
 
     # Create optimizer
     optimizer = th.optim.AdamW(model.parameters(), lr=0.001)
-    criterion = tv.ops.sigmoid_focal_loss
-    regularizer = l2_regularization
+    criterion = monai.losses.dice.DiceFocalLoss()
+    regularizer = None  # l2_regularization
     metric = accuracy
-    epochs = 50
+    epochs = 500
     best_test_loss = float("inf")
-    patience = int(epochs * 0.01)
+    best_test_metric = -1
+    patience = epochs  # int(epochs * 0.01)
     counter = 0
 
     train_info = {
@@ -159,7 +163,7 @@ def main():
             # Otherwise, ram data through the model as usual
             else:
                 out, _ = model(X)
-            loss = criterion(out, y, reduction="mean")
+            loss = criterion(out, y)
             if regularizer:
                 loss += regularizer(model, device)
             metric_value = metric(out, y)
@@ -191,7 +195,7 @@ def main():
                 # Otherwise, ram data through the model as usual
                 else:
                     out, _ = model(X)
-                loss = criterion(out, y, reduction="mean")
+                loss = criterion(out, y)
                 metric_value = metric(out, y)
                 test_loss += loss.item()
                 test_metric += metric_value.item()
@@ -200,8 +204,8 @@ def main():
         print(f"Test Loss: {test_loss:.3f}, Test Metric: {test_metric:.3f}", end=", ")
 
         # Early stopping
-        if test_loss < best_test_loss:
-            best_test_loss = test_loss
+        if test_metric > best_test_metric:
+            best_test_metric = test_metric
             counter = 0
 
             # Save best model
@@ -213,7 +217,7 @@ def main():
                 print("Early stopping")
                 break
 
-        print(f"Best Test Loss: {best_test_loss:.3f} ({counter}/{patience})")
+        print(f"Best Test Metric: {best_test_metric:.3f} ({counter}/{patience})")
 
         # Save training info
         train_info["Epoch"].append(epoch)
@@ -256,6 +260,7 @@ def main():
     ax2.set_title("Metric")
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("Metric")
+    ax2.set_ylim(0, 1)
     ax2.plot(
         train_info["Epoch"],
         train_info["Train Metric"],
