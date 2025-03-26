@@ -110,9 +110,9 @@ def main():
     criterion = tv.ops.sigmoid_focal_loss
     regularizer = l2_regularization
     metric = accuracy
-    epochs = 20
+    epochs = 1000
     best_test_loss = float("inf")
-    patience = 5
+    patience = int(epochs * 0.01)
     counter = 0
 
     train_info = {
@@ -274,7 +274,7 @@ def main():
     # =======================================================
 
     # Load best model
-    model.load_state_dict(th.load(out_dir + f"/{id}/model.pth"))
+    model.load_state_dict(th.load(out_dir + "/model.pth"))
 
 
 if __name__ == "__main__":
