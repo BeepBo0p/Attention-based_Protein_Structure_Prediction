@@ -29,10 +29,19 @@ def preprocess_data(df_path):
 
     return human_readable, X, y
 
-
 def accuracy(y_pred, y_true):
+    # Select the class with the highest probability
     y_pred = th.argmax(y_pred, dim=-1)
     y_true = th.argmax(y_true, dim=-1)
+    
+    y_real = th.zeros_like(y_pred) == y_true
+    y_real = y_real.float() == 0
+    y_real = y_real.float()
+    
+    # Calculate accuracy 
+    accuracy = (y_pred == y_true).float() * y_real
+    accuracy = accuracy.sum(dim=-1) / y_real.sum(dim=-1)
+    return accuracy.float().mean()
     return (y_pred == y_true).float().mean()
 
 
@@ -110,7 +119,7 @@ def main():
     criterion = tv.ops.sigmoid_focal_loss
     regularizer = l2_regularization
     metric = accuracy
-    epochs = 1000
+    epochs = 50
     best_test_loss = float("inf")
     patience = int(epochs * 0.01)
     counter = 0
