@@ -115,7 +115,7 @@ class GenomeTokenDataset(th.utils.data.Dataset):
         # Convert labels to one-hot encoding
         if one_hot:
             self.genome_label = th.nn.functional.one_hot(
-                th.tensor(self.genome_label, dtype=th.int64), num_classes=3
+                self.genome_label.clone().detach().long(), num_classes=3
             )
 
     def __len__(self):
