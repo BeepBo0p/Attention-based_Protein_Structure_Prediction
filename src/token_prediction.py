@@ -108,66 +108,38 @@ def preprocess_data(df_path):
     return human_readable, X, Y, length
 
 
+# =======================================================
+# Dataset Definition
+# =======================================================
+
+
 class GenomeTokenDataset(th.utils.data.Dataset):
     def __init__(self, X, Y, indice_information, sequence_length=20, one_hot=True):
         super(GenomeTokenDataset, self).__init__()
-        self.indice_information = indice_information
-        self.sequence_length = sequence_length
-
         self.genome_sequence = []
         self.genome_label = []
 
+        # Construct chunks of sequences, without breaking sequence boundaries
         for i, _ in enumerate(X):
             indices_in_sequence = np.arange(i, i + sequence_length)
 
+            # Check if the indices are within the bounds of the sequence
             if any([idx >= len(X) for idx in indices_in_sequence]):
                 continue
 
+            # Check if chunk breaks sequence boundaries
             if any([idx in indice_information for idx in indices_in_sequence[1:]]):
                 continue
 
             lower = np.min(indices_in_sequence)
             upper = np.max(indices_in_sequence) + 1
 
-            if upper - lower != sequence_length:
-                continue
-
             self.genome_sequence.append(X[lower:upper])
             self.genome_label.append(Y[lower:upper])
 
-        for i, row in enumerate(self.genome_sequence):
-            if len(row) != sequence_length:
-                print("Genome sequence checks failed")
-                print(row)
-                print(len(row))
-                print(f"Index: {i} / {len(self.genome_sequence)}")
-                exit()
-
-            # If any sequence value is negative, print the row
-            if any([sequence < 0 for sequence in row]):
-                print("Genome sequence checks failed")
-                print(row)
-                print(f"Index: {i} / {len(self.genome_sequence)}")
-                exit()
-
-        for i, row in enumerate(self.genome_label):
-            if len(row) != sequence_length:
-                print("Genome label checks failed")
-                print(row)
-                print(len(row))
-                print(f"Index: {i} / {len(self.genome_label)}")
-                exit()
-
-            # If any label value is negative, print the row
-            if any([label < 0 for label in row]):
-                print("Genome label checks failed")
-                print(row)
-                print(f"Index: {i} / {len(self.genome_label)}")
-                exit()
-
+        # Convert to numpy arrays, and then to tensors
         self.genome_sequence = np.array(self.genome_sequence)
         self.genome_label = np.array(self.genome_label)
-
         self.genome_sequence = th.tensor(self.genome_sequence, dtype=th.float32)
         self.genome_label = th.tensor(self.genome_label, dtype=th.float32)
 
@@ -266,6 +238,11 @@ class GenomeTokenAttention(th.nn.Module):
         return x.view(b, s, -1)
 
 
+# =======================================================
+# Main Function
+# =======================================================
+
+
 def main():
     # Initialize configuration
     config = Config()
@@ -325,13 +302,16 @@ def main():
             num_layers=config.num_layers,
             output_size=config.output_size,
         ).to(device)
-    else:
+    elif config.model_type == "attention":
         model = GenomeTokenAttention(
             output_size=config.output_size,
             embed_dim=config.embed_dim,
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
         ).to(device)
+
+    else:
+        raise ValueError("Invalid model")
 
     # Loss Function
     loss_fn = tv.ops.focal_loss.sigmoid_focal_loss
