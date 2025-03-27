@@ -466,9 +466,20 @@ def main():
         train_stats_df.write_csv(out_path + "/train_stats.csv")
 
         # Create a plot of the training statistics and save it
-        train_stats_df = train_stats_df.to_pandas()
-        train_stats_df.plot()
+        fig, ax = plt.subplots(2, 1, figsize=(10, 10))
+        ax[0].plot(train_stats["train_loss"], label="Train Loss")
+        ax[0].plot(train_stats["val_loss"], label="Val Loss")
+        ax[0].set_title("Loss")
+        ax[0].legend()
+
+        ax[1].set_ylim(0, 1)
+        ax[1].plot(train_stats["train_metric"], label="Train Accuracy")
+        ax[1].plot(train_stats["val_metric"], label="Val Accuracy")
+        ax[1].set_title("Accuracy")
+        ax[1].legend()
+
         plt.savefig(out_path + "/train_stats.png")
+        plt.close()
 
     # =======================================================
     # Inference evaluation
