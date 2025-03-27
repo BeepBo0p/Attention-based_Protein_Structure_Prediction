@@ -2,11 +2,46 @@ import json
 import time
 import os
 
+from matplotlib import pyplot as plt
 import numpy as np
 import polars as pl
 import torch as th
 import torchvision as tv
 import yaml
+
+
+# =======================================================
+# Configuration Class
+# =======================================================
+class Config:
+    def __init__(self):
+        # Data paths
+        self.data_path = "data/Protein_Secondary_Structure/"
+        self.train_file = "protein-secondary-structure.train.csv"
+        self.test_file = "protein-secondary-structure.test.csv"
+        self.char_mapping_file = "data/Protein_Secondary_Structure/char_to_idx.json"
+        self.label_mapping_file = "data/Protein_Secondary_Structure/label_to_idx.json"
+
+        # Dataset parameters
+        self.sequence_length = 20
+        self.one_hot = True
+        self.train_val_split = 0.8
+        self.batch_size = 32
+
+        # Model parameters
+        self.model_type = "attention"  # "lstm" or "attention"
+        self.input_size = 1
+        self.hidden_size = 128
+        self.output_size = 3
+        self.num_layers = 2
+        self.embed_dim = 256
+
+        # Training parameters
+        self.learning_rate = 0.001
+        self.patience = 20
+        self.max_epochs = 1000
+        self.focal_loss_alpha = 0.25
+        self.focal_loss_gamma = 2.0
 
 
 # =======================================================
@@ -180,6 +215,7 @@ class GenomeTokenLSTM(th.nn.Module):
 class GenomeTokenAttention(th.nn.Module):
     def __init__(self, embed_dim, hidden_size, output_size, num_layers=2):
         super(GenomeTokenAttention, self).__init__()
+        self.embed_dim = embed_dim
         self.embedding = th.nn.Embedding(20, embed_dim)
         self.mha = th.nn.MultiheadAttention(
             embed_dim, num_heads=8, dropout=0.1, batch_first=True
@@ -212,7 +248,7 @@ class GenomeTokenAttention(th.nn.Module):
         b, s = x.shape
 
         pos = np.arange(s)
-        pos = self._sinusoidal_positional_embedding(s, 256).to(x.device)
+        pos = self._sinusoidal_positional_embedding(s, self.embed_dim).to(x.device)
         pos = pos.unsqueeze(0).expand(b, -1, -1)
         x = self.embedding(x) + pos
         x_res = x
@@ -231,38 +267,37 @@ class GenomeTokenAttention(th.nn.Module):
 
 
 def main():
+    # Initialize configuration
+    config = Config()
+
     # =======================================================
     # Data Preprocessing
     # =======================================================
 
     # Get data
-    data_path = "data/Protein_Secondary_Structure/"
-    tain_file = "protein-secondary-structure.train.csv"
-    test_file = "protein-secondary-structure.test.csv"
-
     train_human_readable, train_X, train_y, train_length = preprocess_data(
-        data_path + tain_file
+        config.data_path + config.train_file
     )
     test_human_readable, test_X, test_y, test_length = preprocess_data(
-        data_path + test_file
+        config.data_path + config.test_file
     )
 
-    # Set train-val split
-    train_val_split = 0.8
     # Create Dataset
     train_dataset = GenomeTokenDataset(train_X, train_y, train_length)
     train_dataset, val_dataset = th.utils.data.random_split(
         train_dataset,
         [
-            int(train_val_split * len(train_dataset)),
-            len(train_dataset) - int(train_val_split * len(train_dataset)),
+            int(config.train_val_split * len(train_dataset)),
+            len(train_dataset) - int(config.train_val_split * len(train_dataset)),
         ],
     )
 
     train_dataloader = th.utils.data.DataLoader(
-        train_dataset, batch_size=32, shuffle=True
+        train_dataset, batch_size=config.batch_size, shuffle=True
     )
-    val_dataloader = th.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
+    val_dataloader = th.utils.data.DataLoader(
+        val_dataset, batch_size=config.batch_size, shuffle=False
+    )
 
     # =======================================================
     # Model Training
@@ -282,15 +317,21 @@ def main():
         else "cpu"
     )
 
-    # Model Parameters
-    input_size = 1
-    hidden_size = 128
-    output_size = 3
-    num_layers = 2
-
     # Model
-    model = GenomeTokenLSTM(input_size, hidden_size, output_size, num_layers).to(device)
-    model = GenomeTokenAttention(256, hidden_size, output_size, num_layers).to(device)
+    if config.model_type == "lstm":
+        model = GenomeTokenLSTM(
+            hidden_size=config.hidden_size,
+            input_size=config.input_size,
+            num_layers=config.num_layers,
+            output_size=config.output_size,
+        ).to(device)
+    else:
+        model = GenomeTokenAttention(
+            output_size=config.output_size,
+            embed_dim=config.embed_dim,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+        ).to(device)
 
     # Loss Function
     loss_fn = tv.ops.focal_loss.sigmoid_focal_loss
@@ -298,10 +339,9 @@ def main():
     metric_fn = accuracy
 
     # Optimizer
-    optimizer = th.optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = th.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
     # Early Stopping
-    patience = 20
     best_val_loss = np.inf
     counter = 0
 
@@ -309,7 +349,7 @@ def main():
         "model": model.__class__.__name__,
         "loss_fn": loss_fn.__class__.__name__,
         "optimizer": optimizer.__class__.__name__,
-        "patience": patience,
+        "config": vars(config),
     }
 
     train_stats = {
@@ -321,7 +361,7 @@ def main():
 
     try:
         # Training Loop
-        for epoch in range(1000):
+        for epoch in range(config.max_epochs):
             model.train()
 
             train_losses = []
@@ -334,7 +374,13 @@ def main():
                 if isinstance(loss_fn, th.nn.CrossEntropyLoss):
                     loss = loss_fn(y_pred, y)
                 elif callable(loss_fn):
-                    loss = loss_fn(y_pred, y, alpha=0.25, gamma=2.0, reduction="mean")
+                    loss = loss_fn(
+                        y_pred,
+                        y,
+                        alpha=config.focal_loss_alpha,
+                        gamma=config.focal_loss_gamma,
+                        reduction="mean",
+                    )
                 else:
                     loss = loss_fn(y_pred, y)
                 loss.backward()
@@ -365,7 +411,11 @@ def main():
                         loss = loss_fn(y_pred, y)
                     elif callable(loss_fn):
                         loss = loss_fn(
-                            y_pred, y, alpha=0.25, gamma=2.0, reduction="mean"
+                            y_pred,
+                            y,
+                            alpha=config.focal_loss_alpha,
+                            gamma=config.focal_loss_gamma,
+                            reduction="mean",
                         )
                     else:
                         loss = loss_fn(y_pred, y)
@@ -378,7 +428,7 @@ def main():
             val_metric = np.mean(val_metrics)
 
             print(
-                f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f} | Patience: {patience - counter}"
+                f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f} | Patience: {config.patience - counter}"
             )
 
             # Early Stopping
@@ -387,11 +437,11 @@ def main():
                 counter = 0
 
                 # Save the model
-                pass
+                th.save(model.state_dict(), out_path + "/model.pth")
 
             else:
                 counter += 1
-                if counter >= patience:
+                if counter >= config.patience:
                     print("Early Stopping")
                     break
 
@@ -414,6 +464,11 @@ def main():
         # Save the training statistics using polars
         train_stats_df = pl.DataFrame(train_stats)
         train_stats_df.write_csv(out_path + "/train_stats.csv")
+
+        # Create a plot of the training statistics and save it
+        train_stats_df = train_stats_df.to_pandas()
+        train_stats_df.plot()
+        plt.savefig(out_path + "/train_stats.png")
 
     # =======================================================
     # Inference evaluation
@@ -453,10 +508,10 @@ def main():
         )
 
     # Load in character mapping and label mapping
-    with open("data/Protein_Secondary_Structure/char_to_idx.json", "r") as f:
+    with open(config.char_mapping_file, "r") as f:
         char_mapping = json.load(f)
 
-    with open("data/Protein_Secondary_Structure/label_to_idx.json", "r") as f:
+    with open(config.label_mapping_file, "r") as f:
         label_mapping = json.load(f)
 
     # Reverse the mapping
