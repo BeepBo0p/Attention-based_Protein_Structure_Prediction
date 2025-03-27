@@ -42,6 +42,8 @@ class Config:
         self.max_epochs = 1000
         self.focal_loss_alpha = 0.25
         self.focal_loss_gamma = 2.0
+        self.reg_lambda = 0
+        self.reg_p = 1
 
 
 # =======================================================
@@ -53,8 +55,56 @@ def accuracy(y_pred, y_true):
     return th.mean((y_pred == y_true).float())
 
 
+def f1_score(y_pred, y_true, classes=3, background_class=0):
+    y_pred = th.argmax(y_pred, dim=1)
+    y_true = th.argmax(y_true, dim=1)
+
+    # Get the confusion matrix
+    cm = th.zeros(classes, classes)
+    for i in range(classes):
+        for j in range(classes):
+            cm[i, j] = th.sum((y_pred == i) & (y_true == j))
+
+    # Calculate the precision, recall, and f1 score
+    precision = th.zeros(classes)
+    recall = th.zeros(classes)
+    f1 = th.zeros(classes)
+    for i in range(classes):
+        precision[i] = cm[i, i] / (th.sum(cm[i, :]) + 1e-6)
+        recall[i] = cm[i, i] / (th.sum(cm[:, i]) + 1e-6)
+        f1[i] = 2 * precision[i] * recall[i] / (precision[i] + recall[i] + 1e-6)
+
+    # Return f1 for all classes except the background class
+    if background_class is not None:
+        foreground_classes = [i for i in range(classes) if i != background_class]
+        return th.mean(f1[foreground_classes])
+
+    return th.mean(f1)
+
+
 def convert_sequence_to_string(sequence, mapping):
     return "".join([mapping[seq] for seq in sequence])
+
+
+def p_norm_regularizer(model, p=2, reduction="sum"):
+    reg = th.tensor(0.0).to(next(model.parameters()).device)
+
+    for param in model.parameters():
+        if p == float("inf"):
+            reg = th.max(reg, th.norm(param, p))
+        else:
+            reg += th.norm(param, p)
+
+    if p == float("inf"):
+        return reg
+
+    if reduction == "mean":
+        reg /= len(list(model.parameters()))
+    elif reduction == "sum":
+        pass
+    else:
+        raise ValueError("Invalid reduction")
+    return reg
 
 
 # =======================================================
@@ -316,7 +366,7 @@ def main():
     # Loss Function
     loss_fn = tv.ops.focal_loss.sigmoid_focal_loss
     loss_fn = th.nn.CrossEntropyLoss()
-    metric_fn = accuracy
+    metric_fn = f1_score
 
     # Optimizer
     optimizer = th.optim.AdamW(model.parameters(), lr=config.learning_rate)
@@ -363,6 +413,8 @@ def main():
                     )
                 else:
                     loss = loss_fn(y_pred, y)
+                reg = p_norm_regularizer(model, p=config.reg_p, reduction="mean")
+                loss += config.reg_lambda * reg
                 loss.backward()
                 optimizer.step()
 
@@ -375,7 +427,7 @@ def main():
             train_metric = np.mean(train_metrics)
 
             print(
-                f"Epoch: {epoch} | Train , Loss: {train_loss:.3f}, Acc: {train_metric:.3f}",
+                f"Epoch: {epoch} | Train , Loss: {train_loss:.3f}, Metric: {train_metric:.3f}",
                 end=" | ",
             )
 
@@ -399,6 +451,8 @@ def main():
                         )
                     else:
                         loss = loss_fn(y_pred, y)
+                    reg = p_norm_regularizer(model, p=config.reg_p, reduction="mean")
+                    loss += config.reg_lambda * reg
                     metric = metric_fn(y_pred, y)
 
                     val_losses.append(loss.item())
@@ -408,7 +462,7 @@ def main():
             val_metric = np.mean(val_metrics)
 
             print(
-                f"Val , Loss: {val_loss:.3f}, Acc: {val_metric:.3f} | Patience: {config.patience - counter}"
+                f"Val , Loss: {val_loss:.3f}, Metric: {val_metric:.3f} | Patience: {config.patience - counter}"
             )
 
             # Early Stopping
@@ -453,9 +507,9 @@ def main():
         ax[0].legend()
 
         ax[1].set_ylim(0, 1)
-        ax[1].plot(train_stats["train_metric"], label="Train Accuracy")
-        ax[1].plot(train_stats["val_metric"], label="Val Accuracy")
-        ax[1].set_title("Accuracy")
+        ax[1].plot(train_stats["train_metric"], label="Train Metric")
+        ax[1].plot(train_stats["val_metric"], label="Val Metric")
+        ax[1].set_title("Metric")
         ax[1].legend()
 
         plt.savefig(out_path + "/train_stats.png")
@@ -464,6 +518,9 @@ def main():
     # =======================================================
     # Inference evaluation
     # =======================================================
+
+    # Load the best model
+    model.load_state_dict(th.load(out_path + "/model.pth"))
 
     # Split the test dataset into its constituent sequences
     test_sequences = []
@@ -476,6 +533,7 @@ def main():
     print(f"Number of test sequences: {len(test_sequences)}")
 
     # Perform prediction on the test split
+    # TODO: Consider doing it autoregressively with next token prediction and a sliding window
     predicted_labels = []
     prediction_accuracies = []
     for seq, label in zip(test_sequences, test_sequences_labels):
