@@ -25,7 +25,7 @@ bioinfo_project_frfr/
 
 1. **Clone the Repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/BeepBo0p/Attention-based_Protein_Structure_Prediction.git
    cd bioinfo_project_frfr
    ```
 
