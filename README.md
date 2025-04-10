@@ -26,7 +26,7 @@ Project root/
 1. **Clone the Repository**
    ```bash
    git clone https://github.com/BeepBo0p/Attention-based_Protein_Structure_Prediction.git
-   cd bioinfo_project_frfr
+   cd Attention-based_Protein_Structure_Prediction
    ```
 
 2. **Set Up Python Environment**
